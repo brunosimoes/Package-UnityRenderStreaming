@@ -12,6 +12,8 @@ namespace Unity.RenderStreaming
 
         private string connectionId;
 
+        public override IEnumerable<Component> Streams => streams;
+
         public void AddComponent(Component component)
         {
             streams.Add(component);
@@ -44,15 +46,8 @@ namespace Unity.RenderStreaming
 
             foreach (var sender in streams.OfType<IStreamSender>())
             {
-                AddSender(connectionId, sender);
-                SetSenderCodecs(connectionId, sender);
+                AddSender(data.connectionId, sender);
             }
-
-            foreach (var receiver in streams.OfType<IStreamReceiver>())
-            {
-                SetReceiverCodecs(connectionId, receiver);
-            }
-
             foreach (var channel in streams.OfType<IDataChannel>().Where(c => c.IsLocal))
             {
                 AddChannel(connectionId, channel);
@@ -89,18 +84,6 @@ namespace Unity.RenderStreaming
         {
             if (data.connectionId != connectionId)
                 return;
-
-
-            foreach (var sender in streams.OfType<IStreamSender>())
-            {
-                SetSenderCodecs(connectionId, sender);
-            }
-
-            foreach (var receiver in streams.OfType<IStreamReceiver>())
-            {
-                SetReceiverCodecs(connectionId, receiver);
-            }
-
             SendAnswer(data.connectionId);
         }
 
@@ -109,10 +92,9 @@ namespace Unity.RenderStreaming
             if (data.connectionId != connectionId)
                 return;
 
-            var receiver = streams.OfType<IStreamReceiver>()
-                .FirstOrDefault((r =>
-                    r.Track == null && r.Kind == data.transceiver.Receiver.Track.Kind && data.transceiver.Receiver.Track.Enabled));
-            receiver?.SetTransceiver(connectionId, data.transceiver);
+            var track = data.transceiver.Receiver.Track;
+            IStreamReceiver receiver = GetReceiver(track.Kind);
+            SetReceiver(data.connectionId, receiver, data.transceiver);
         }
 
         public void OnAddChannel(SignalingEventData data)
@@ -121,6 +103,15 @@ namespace Unity.RenderStreaming
                 return;
             var channel = streams.OfType<IDataChannel>().FirstOrDefault(r => !r.IsConnected && !r.IsLocal);
             channel?.SetChannel(connectionId, data.channel);
+        }
+
+        IStreamReceiver GetReceiver(WebRTC.TrackKind kind)
+        {
+            if (kind == WebRTC.TrackKind.Audio)
+                return streams.OfType<AudioStreamReceiver>().First();
+            if (kind == WebRTC.TrackKind.Video)
+                return streams.OfType<VideoStreamReceiver>().First();
+            throw new System.ArgumentException();
         }
     }
 }

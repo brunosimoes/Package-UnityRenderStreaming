@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 using Unity.WebRTC;
 
 namespace Unity.RenderStreaming
@@ -7,24 +8,37 @@ namespace Unity.RenderStreaming
     /// <summary>
     /// 
     /// </summary>
+    [Serializable]
     public class VideoCodecInfo : IEquatable<VideoCodecInfo>
     {
-        const string KeyCodecImplementation = "implementation_name";
+        static readonly string KeyCodecImplementation = "implementation_name";
+
+        [SerializeField]
+        private string m_MimeType;
+        [SerializeField]
+        private string m_SdpFmtpLine;
+
+        readonly Dictionary<string, string> m_parameters = new Dictionary<string, string>();
 
         /// <summary>
         /// 
         /// </summary>
-        public string name { get { return capability.mimeType.Split('/')[1]; } }
+        public string name { get { return m_MimeType.GetCodecName(); } }
 
         /// <summary>
         /// 
         /// </summary>
-        public string mimeType { get { return capability.mimeType; } }
+        public string mimeType { get { return m_MimeType; } }
 
         /// <summary>
         /// 
         /// </summary>
-        public string CodecImplementation { get { return parameters[KeyCodecImplementation]; } }
+        public string codecImplementation { get { return parameters[KeyCodecImplementation]; } }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public string sdpFmtpLine { get { return m_SdpFmtpLine; } }
 
         /// <summary>
         /// 
@@ -35,16 +49,78 @@ namespace Unity.RenderStreaming
         {
             if (other == null)
                 return false;
-            return this.capability.mimeType == other.capability.mimeType
-                && this.capability.sdpFmtpLine == other.capability.sdpFmtpLine;
+            return this.mimeType == other.mimeType
+                && this.sdpFmtpLine == other.sdpFmtpLine;
         }
 
-        internal RTCRtpCodecCapability capability;
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="obj"></param>
+        /// <returns></returns>
+        public override bool Equals(object obj)
+        {
+            return obj is VideoCodecInfo ? Equals((VideoCodecInfo)obj) : base.Equals(obj);
+        }
 
-        protected readonly Dictionary<string, string> parameters = new Dictionary<string, string>();
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
+        public override int GetHashCode()
+        {
+            return new { mimeType, sdpFmtpLine }.GetHashCode();
+        }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="left"></param>
+        /// <param name="right"></param>
+        /// <returns></returns>
+        public static bool operator ==(VideoCodecInfo left, VideoCodecInfo right)
+        {
+            if (ReferenceEquals(left, null))
+            {
+                return ReferenceEquals(left, null);
+            }
+            else
+            {
+                return left.Equals(right);
+            }
+        }
 
-        static public VideoCodecInfo Create(RTCRtpCodecCapability caps)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="left"></param>
+        /// <param name="right"></param>
+        /// <returns></returns>
+        public static bool operator !=(VideoCodecInfo left, VideoCodecInfo right)
+        {
+            return !(left == right);
+        }
+
+        protected Dictionary<string, string> parameters
+        {
+            get
+            {
+                if (m_parameters != null)
+                    return m_parameters;
+
+                if (string.IsNullOrEmpty(m_SdpFmtpLine))
+                    return null;
+                string[] subs = m_SdpFmtpLine.Split(';');
+                foreach (string sub in subs)
+                {
+                    string[] pair = sub.Split('=');
+                    m_parameters.Add(pair[0], pair[1]);
+                }
+                return m_parameters;
+            }
+        }
+
+        static internal VideoCodecInfo Create(RTCRtpCodecCapability caps)
         {
             switch(caps.mimeType)
             {
@@ -56,12 +132,21 @@ namespace Unity.RenderStreaming
                     return new VideoCodecInfo(caps);
             }
         }
+
+        internal bool Equals(RTCRtpCodecCapability other)
+        {
+            if (other == null)
+                return false;
+            return this.mimeType == other.mimeType
+                && this.sdpFmtpLine == other.sdpFmtpLine;
+        }
+
         protected VideoCodecInfo(RTCRtpCodecCapability caps)
         {
-            capability = caps;
+            m_MimeType = caps.mimeType;
+            m_SdpFmtpLine = caps.sdpFmtpLine;
 
-            string[] subs = capability.sdpFmtpLine.Split(';');
-
+            string[] subs = m_SdpFmtpLine.Split(';');
             foreach(string sub in subs)
             {
                 string[] pair = sub.Split('=');
@@ -103,9 +188,16 @@ namespace Unity.RenderStreaming
         /// <summary>
         /// 
         /// </summary>
-        public VP9Profile profile
+        public VP9Profile? profile
         {
-            get { return (VP9Profile)Enum.ToObject(typeof(VP9Profile), Convert.ToInt32(parameters[KeyProfileId])); }
+            get
+            {
+                if(parameters.TryGetValue(KeyProfileId, out var value))
+                {
+                    return (VP9Profile)Enum.ToObject(typeof(VP9Profile), Convert.ToInt32(value));
+                }
+                return null;
+            }
         }
 
         internal VP9CodecInfo(RTCRtpCodecCapability caps) : base(caps)

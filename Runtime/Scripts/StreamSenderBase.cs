@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.WebRTC;
@@ -11,6 +12,25 @@ namespace Unity.RenderStreaming
     /// </summary>
     public abstract class StreamSenderBase : MonoBehaviour, IStreamSender
     {
+        internal class WaitForCreateTrack : CustomYieldInstruction
+        {
+            public MediaStreamTrack Track { get { return m_track; } }
+
+            MediaStreamTrack m_track;
+
+            bool m_keepWaiting = true;
+
+            public override bool keepWaiting { get { return m_keepWaiting; } }
+
+            public WaitForCreateTrack() { }
+
+            public void Done(MediaStreamTrack track)
+            {
+                m_track = track;
+                m_keepWaiting = false;
+            }
+        }
+
         /// <summary>
         ///
         /// </summary>
@@ -27,36 +47,93 @@ namespace Unity.RenderStreaming
         public OnStoppedStreamHandler OnStoppedStream { get; set; }
 
         /// <summary>
-        ///
+        /// 
         /// </summary>
-        public MediaStreamTrack Track
+        /// <returns></returns>
+        internal abstract WaitForCreateTrack CreateTrack();
+
+
+        internal virtual void ReplaceTrack(MediaStreamTrack track)
         {
-            get
+            if (track == null)
+                throw new ArgumentNullException("track", "This argument must be not null.");
+
+            if (m_track == Track)
+                throw new ArgumentException("track", "The value of this argument has already been set.");
+
+            /// todo:: If not disposing the old track here, the app will crash.
+            /// This problem is caused by the MediaStreamTrack when it is destroyed on the thread other than the main thread.
+            m_track?.Dispose();
+
+            m_track = Track;
+            foreach (var transceiver in Transceivers.Values)
             {
-                if (m_track == null)
-                    m_track = CreateTrack();
-                return m_track;
+                transceiver.Sender.ReplaceTrack(m_track);
             }
         }
+
+        internal void SetTrack(MediaStreamTrack track)
+        {
+            if (track == null)
+                throw new ArgumentNullException("track", "This argument must be not null.");
+
+            if (m_track != null)
+                throw new InvalidOperationException("Track is not null.");
+            m_track = track;
+        }
+
+        private MediaStreamTrack m_track;
+
+        private Dictionary<string, RTCRtpTransceiver> m_transceivers =
+            new Dictionary<string, RTCRtpTransceiver>();
+
+        /// <summary>
+        ///
+        /// </summary>
+        public MediaStreamTrack Track => m_track;
 
         /// <summary>
         /// 
         /// </summary>
+        public bool isPlaying
+        {
+            get
+            {
+                if (!Application.isPlaying)
+                    return false;
+                foreach (var transceiver in Transceivers.Values)
+                {
+                    if (string.IsNullOrEmpty(transceiver.Mid))
+                        continue;
+                    if (transceiver.Sender.Track.ReadyState == TrackState.Ended)
+                        continue;
+                    return true;
+                }
+                return false;
+            }
+        }
+
         protected virtual void OnDestroy()
         {
             m_track?.Dispose();
             m_track = null;
         }
 
-        /// <summary>
-        ///
-        /// </summary>
-        /// <returns></returns>
-        protected virtual MediaStreamTrack CreateTrack() { return null; }
+        protected virtual void OnEnable()
+        {
+            if (m_track?.ReadyState == TrackState.Live)
+            {
+                m_track.Enabled = true;
+            }
+        }
 
-        private Dictionary<string, RTCRtpTransceiver> m_transceivers =
-            new Dictionary<string, RTCRtpTransceiver>();
-        private MediaStreamTrack m_track;
+        protected virtual void OnDisable()
+        {
+            if (m_track?.ReadyState == TrackState.Live)
+            {
+                m_track.Enabled = false;
+            }
+        }
 
         /// <summary>
         ///
@@ -71,85 +148,17 @@ namespace Unity.RenderStreaming
             {
                 m_transceivers.Remove(connectionId);
                 OnStoppedStream?.Invoke(connectionId);
+                if (!m_transceivers.Any())
+                {
+                    m_track.Dispose();
+                    m_track = null;
+                }
             }
             else
             {
                 m_transceivers.Add(connectionId, transceiver);
                 OnStartedStream?.Invoke(connectionId);
             }
-        }
-
-        private List<RTCRtpCodecCapability> m_senderAudioCodecs = new List<RTCRtpCodecCapability>();
-        private List<RTCRtpCodecCapability> m_senderVideoCodecs = new List<RTCRtpCodecCapability>();
-
-        /// <summary>
-        ///
-        /// </summary>
-        /// <param name="connectionId"></param>
-        /// <param name="transceivers"></param>
-        public void SetSenderCodec(string connectionId, RTCRtpTransceiver transceiver)
-        {
-            if (m_senderAudioCodecs.Count != 0)
-            {
-                if(transceiver.Sender.Track.Kind == TrackKind.Audio)
-                {
-                    transceiver.SetCodecPreferences(m_senderAudioCodecs.ToArray());
-                }
-            }
-
-            if (m_senderVideoCodecs.Count != 0)
-            {
-                if (transceiver.Sender.Track.Kind == TrackKind.Video)
-                {
-                    transceiver.SetCodecPreferences(m_senderVideoCodecs.ToArray());
-                }
-            }
-        }
-
-        /// <summary>
-        /// argument index must use dictionary key from GetAvailableAudioCodecsName
-        /// </summary>
-        /// <seealso cref="AvailableCodecsUtils.GetAvailableAudioCodecsName"/>
-        /// <param name="index"></param>
-        /// <exception cref="ArgumentOutOfRangeException"></exception>
-        public void FilterAudioCodecs(int index)
-        {
-            if (index < 0)
-            {
-                m_senderAudioCodecs.Clear();
-                return;
-            }
-
-            if (!AvailableCodecsUtils.TryGetAvailableAudioCodec(index, out var codec))
-            {
-                throw new ArgumentOutOfRangeException(nameof(index), index, "Index was out of range.");
-            }
-
-            m_senderAudioCodecs.Clear();
-            m_senderAudioCodecs.Add(codec);
-        }
-
-        /// <summary>
-        /// argument index must use dictionary key from GetAvailableVideoCodecsName
-        /// </summary>
-        /// <seealso cref="AvailableCodecsUtils.GetAvailableVideoCodecsName"/>
-        /// <param name="index"></param>
-        /// <exception cref="ArgumentOutOfRangeException"></exception>
-        public void FilterVideoCodecs(int index)
-        {
-            if (index < 0)
-            {
-                m_senderVideoCodecs.Clear();
-                return;
-            }
-
-            if (!AvailableCodecsUtils.TryGetAvailableVideoCodec(index, out var codec))
-            {
-                throw new ArgumentOutOfRangeException(nameof(index), index, "Index was out of range.");
-            }
-
-            m_senderVideoCodecs.Clear();
-            m_senderVideoCodecs.Add(codec);
         }
     }
 }

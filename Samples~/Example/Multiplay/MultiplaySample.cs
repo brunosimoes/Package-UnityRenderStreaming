@@ -18,11 +18,20 @@ namespace Unity.RenderStreaming.Samples
         [SerializeField] GameObject menuCamera;
         [SerializeField] GameObject panel;
         [SerializeField] RawImage videoImage;
+        [SerializeField] ShowStatsUI statsUI;
 
         enum Role
         {
             Host = 0,
             Guest = 1
+        }
+
+        private RenderStreamingSettings settings;
+
+
+        private void Awake()
+        {
+            settings = SampleManager.Instance.Settings;
         }
 
         void Start()
@@ -77,7 +86,8 @@ namespace Unity.RenderStreaming.Samples
             playerInput.PerformPairingWithAllLocalDevices();
             playerController.CheckPairedDevices();
 
-            renderStreaming.Run(signaling: RenderStreamingSettings.Signaling,
+            statsUI.AddSignalingHandler(handler);
+            renderStreaming.Run(signaling: settings?.Signaling,
                 handlers: new SignalingHandlerBase[] {handler}
             );
         }
@@ -87,7 +97,8 @@ namespace Unity.RenderStreaming.Samples
             var guestPlayer = GameObject.Instantiate(prefabGuest);
             var handler = guestPlayer.GetComponent<SingleConnection>();
 
-            renderStreaming.Run(signaling: RenderStreamingSettings.Signaling,
+            statsUI.AddSignalingHandler(handler);
+            renderStreaming.Run(signaling: settings?.Signaling,
                 handlers: new SignalingHandlerBase[] {handler}
             );
 
@@ -98,7 +109,8 @@ namespace Unity.RenderStreaming.Samples
             var channel = guestPlayer.GetComponent<MultiplayChannel>();
             channel.OnStartedChannel += _ => { StartCoroutine(ChangeLabel(channel, username)); };
 
-            receiveVideoViewer.FilterVideoCodecs(RenderStreamingSettings.SelectVideoCodecIndex);
+            if(settings != null)
+                receiveVideoViewer.SetCodec(settings.ReceiverVideoCodec);
 
             // todo(kazuki):
             yield return new WaitForSeconds(1f);

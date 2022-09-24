@@ -8,10 +8,11 @@ namespace Unity.RenderStreaming
         IOfferHandler, IAddChannelHandler, IDisconnectHandler, IDeletedConnectionHandler,
         IAddReceiverHandler
     {
-        [SerializeField]
-        private List<Component> streams = new List<Component>();
+        [SerializeField] private List<Component> streams = new List<Component>();
 
         private List<string> connectionIds = new List<string>();
+
+        public override IEnumerable<Component> Streams => streams;
 
         public void AddComponent(Component component)
         {
@@ -55,9 +56,9 @@ namespace Unity.RenderStreaming
 
         public void OnAddReceiver(SignalingEventData data)
         {
-            var receiver = streams.OfType<IStreamReceiver>().
-                FirstOrDefault(r => r.Track == null);
-            receiver?.SetTransceiver(data.connectionId, data.transceiver);
+            var track = data.transceiver.Receiver.Track;
+            IStreamReceiver receiver = GetReceiver(track.Kind);
+            SetReceiver(data.connectionId, receiver, data.transceiver);
         }
 
         public void OnOffer(SignalingEventData data)
@@ -72,11 +73,6 @@ namespace Unity.RenderStreaming
             foreach (var source in streams.OfType<IStreamSender>())
             {
                 AddSender(data.connectionId, source);
-                SetSenderCodecs(data.connectionId, source);
-            }
-            foreach (var receiver in streams.OfType<IStreamReceiver>())
-            {
-                SetReceiverCodecs(data.connectionId, receiver);
             }
             foreach (var channel in streams.OfType<IDataChannel>().Where(c => c.IsLocal))
             {
@@ -90,6 +86,15 @@ namespace Unity.RenderStreaming
             var channel = streams.OfType<IDataChannel>().
                 FirstOrDefault(r => !r.IsConnected && !r.IsLocal);
             channel?.SetChannel(data.connectionId, data.channel);
+        }
+
+        IStreamReceiver GetReceiver(WebRTC.TrackKind kind)
+        {
+            if (kind == WebRTC.TrackKind.Audio)
+                return streams.OfType<AudioStreamReceiver>().First();
+            if (kind == WebRTC.TrackKind.Video)
+                return streams.OfType<VideoStreamReceiver>().First();
+            throw new System.ArgumentException();
         }
     }
 }

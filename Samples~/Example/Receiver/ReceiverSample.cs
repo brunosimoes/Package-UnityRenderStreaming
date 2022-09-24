@@ -42,6 +42,7 @@ namespace Unity.RenderStreaming.Samples
 
         private string connectionId;
         private InputSender inputSender;
+        private RenderStreamingSettings settings;
 
         void Awake()
         {
@@ -56,15 +57,18 @@ namespace Unity.RenderStreaming.Samples
                 source.loop = true;
                 source.Play();
             };
+
+            inputSender = GetComponent<InputSender>();
+            inputSender.OnStartedChannel += OnStartedChannel;
+
+            settings = SampleManager.Instance.Settings;
         }
 
         void Start()
         {
             if (renderStreaming.runOnAwake)
                 return;
-            renderStreaming.Run(signaling: RenderStreamingSettings.Signaling);
-            inputSender = GetComponent<InputSender>();
-            inputSender.OnStartedChannel += OnStartedChannel;
+            renderStreaming.Run(signaling: settings?.Signaling);
         }
 
         void OnUpdateReceiveTexture(Texture texture)
@@ -80,7 +84,7 @@ namespace Unity.RenderStreaming.Samples
 
         void SetInputChange()
         {
-            if (!inputSender.IsConnected || remoteVideoImage.texture == null)
+            if (inputSender == null || !inputSender.IsConnected || remoteVideoImage.texture == null)
                 return;
             inputSender.SetInputRange(remoteVideoImage);
             inputSender.EnableInputPositionCorrection(true);
@@ -94,8 +98,9 @@ namespace Unity.RenderStreaming.Samples
                 connectionIdInput.text = connectionId;
             }
             connectionIdInput.interactable = false;
-            receiveVideoViewer.FilterVideoCodecs(RenderStreamingSettings.SelectVideoCodecIndex);
-            receiveAudioViewer.SetSource(remoteAudioSource);
+            if(settings != null)
+                receiveVideoViewer.SetCodec(settings.ReceiverVideoCodec);
+            receiveAudioViewer.targetAudioSource = remoteAudioSource;
 
             connection.CreateConnection(connectionId);
             startButton.gameObject.SetActive(false);
